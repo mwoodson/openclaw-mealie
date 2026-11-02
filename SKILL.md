@@ -78,6 +78,7 @@ JSON responses print as JSON; errors print JSON to stderr and exit nonzero. Bina
 - Run everything through the `mealie` command (it supplies the URL, token, and file root). Never look for, print, or pass the token yourself.
 - Put any file you import, upload, or download in `~/.openclaw/workspace/family/tmp/mealie/`. Files elsewhere are refused.
 - Recipe links for the family: `http://bison.home.thepad.net:9000/g/woodson/r/<slug>` (public, read-only, works on home Wi-Fi). Never send the internal 10.250.0.10 address.
+- When someone asks for a recipe, reply with its link first, then a short summary in your own words: servings, total time, and the key ingredients with amounts (grams included). Do not paste the full instructions or headnote verbatim. Many saved recipes are published (cookbooks, food sites), and the model provider blocks replies that reproduce them word for word, so the whole reply fails and the person gets nothing. If they want the steps in chat, paraphrase them briefly and point to the link for the full text.
 - This Mealie account can't delete other people's recipes or manage tags/categories. If a request needs that, tell the person to do it in Mealie (or ask Matt).
 - Always narrow discovery: `mealie endpoints --search <word>` and `mealie schema <Name>`. Never dump the full schema or endpoint list.
 - Shopping goes to AnyList via the `shopping` skill, not Mealie's shopping lists.
