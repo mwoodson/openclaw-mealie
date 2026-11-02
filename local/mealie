@@ -1,0 +1,11 @@
+#!/bin/bash
+# mealie: M.A.C.K's wrapper for the vendored openclaw-mealie helper.
+# Install: cp to ~/bin/mealie (chmod 755). Keeps the token out of the gateway's
+# global environment: only this process gets it, read from a 0600 file.
+set -euo pipefail
+SKILL="$HOME/.openclaw/workspace/family/skills/mealie"
+export MEALIE_URL="http://10.250.0.10:9000"
+export MEALIE_API_TOKEN="$(cat "$HOME/.openclaw/secrets/mealie-api-token")"
+export MEALIE_FILE_ROOT="$HOME/.openclaw/workspace/family/tmp/mealie"
+mkdir -p "$MEALIE_FILE_ROOT"
+exec python3 -I -B "$SKILL/scripts/mealie.py" "$@"

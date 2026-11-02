@@ -1,12 +1,12 @@
 ---
 name: mealie
 description: Manage Mealie recipes, imports from websites/images/PDFs/text, meal plans, shopping lists, and the instance API with source-faithful recipe normalization.
-metadata: {"openclaw":{"requires":{"bins":["python3"],"env":["MEALIE_URL","MEALIE_API_TOKEN"]},"primaryEnv":"MEALIE_API_TOKEN"}}
+metadata: {"openclaw":{"requires":{"bins":["mealie","python3"]}}}
 ---
 
 # Mealie
 
-Use this skill for an authorized user's Mealie recipes, organizers, meal plans, shopping lists, foods/units, cookbooks, and API tasks. Run `python3 {baseDir}/scripts/mealie.py ...`. Python's standard library is sufficient for API calls; PDF text extraction optionally requires `pdftotext`. Read [the workflow reference](./references/workflows.md) for detailed import, upload, CRUD, and recovery recipes. Installation and secure credentials: [README](./README.md).
+Use this skill for an authorized user's Mealie recipes, organizers, meal plans, shopping lists, foods/units, cookbooks, and API tasks. Run `mealie ...`. Python's standard library is sufficient for API calls; PDF text extraction optionally requires `pdftotext`. Read [the workflow reference](./references/workflows.md) for detailed import, upload, CRUD, and recovery recipes. Installation and secure credentials: [README](./README.md).
 
 ## Credentials and trust
 
@@ -21,12 +21,12 @@ Use this skill for an authorized user's Mealie recipes, organizers, meal plans, 
 The helper discovers the configured instance's OpenAPI schema. Do not guess endpoints, field names, request media types, IDs, or permissions. The reference is grounded in Mealie v3.28.0; the live schema wins on other versions.
 
 ```sh
-python3 {baseDir}/scripts/mealie.py request GET /api/users/self
-python3 {baseDir}/scripts/mealie.py endpoints --search recipes
-python3 {baseDir}/scripts/mealie.py describe GET /api/recipes
-python3 {baseDir}/scripts/mealie.py describe PATCH '/api/recipes/{slug}'
-python3 {baseDir}/scripts/mealie.py schema
-python3 {baseDir}/scripts/mealie.py schema Recipe-Input
+mealie request GET /api/users/self
+mealie endpoints --search recipes
+mealie describe GET /api/recipes
+mealie describe PATCH '/api/recipes/{slug}'
+mealie schema
+mealie schema Recipe-Input
 ```
 
 `endpoints` exposes advertised operations across the full API, including admin operations only usable with appropriate permissions. `describe METHOD PATH` takes the **templated** path and returns the operation and referenced schemas. `schema NAME` retrieves a named component. This is generic API access, not a claim that every endpoint has been exercised.
@@ -34,9 +34,9 @@ python3 {baseDir}/scripts/mealie.py schema Recipe-Input
 `request METHOD PATH` uses a concrete path. `call OPERATION_ID --path KEY=VALUE` fills a discovered operation's path parameters. Both accept repeated `--query KEY=VALUE`, repeated `--header KEY=VALUE`, `--json JSON|@file|@-`, form fields `--field KEY=VALUE`, repeatable uploads `--file FIELD=PATH`, raw `--body PATH`, `--content-type TYPE`, and `--output PATH`. Choose one body mode matching the operation: JSON, fields/files, or raw body. Arrays in queries use repeated keys; nested objects, numbers, and booleans belong in JSON. Let the helper set multipart boundaries.
 
 ```sh
-python3 {baseDir}/scripts/mealie.py request GET /api/recipes \
+mealie request GET /api/recipes \
   --query 'search=lentil' --query page=1 --query perPage=25
-python3 {baseDir}/scripts/mealie.py call get_one_api_recipes__slug__get \
+mealie call get_one_api_recipes__slug__get \
   --path slug=ACTUAL_SLUG
 ```
 
@@ -51,11 +51,11 @@ Follow pagination until the requested scope is covered; one page is not the enti
 5. GET the full stored recipe after importing and after subsequent changes. Compare ingredients and instructions to the source, fix only verified discrepancies, and report the **returned actual slug**, verified recipe URL, and any missing fields/assets or uncertainties. Never infer the slug from the title. If the UI URL is not established, provide the verified API URL instead of inventing a UI link.
 
 ```sh
-python3 {baseDir}/scripts/mealie.py import-url 'https://publisher.example/recipe'
-python3 {baseDir}/scripts/mealie.py extract-pdf /path/source.pdf
-python3 {baseDir}/scripts/mealie.py import-recipe /path/recipe.json \
+mealie import-url 'https://publisher.example/recipe'
+mealie extract-pdf /path/source.pdf
+mealie import-recipe /path/recipe.json \
   --source-url 'https://publisher.example/recipe'
-python3 {baseDir}/scripts/mealie.py request GET /api/recipes/ACTUAL_SLUG
+mealie request GET /api/recipes/ACTUAL_SLUG
 ```
 
 `import-url` and `import-recipe` support `--include-tags` and `--include-categories`; omit unless the user wants source organizers imported. They return the slug and a verified full recipe. `extract-pdf` prints layout-preserving text but does not OCR scanned pages. For scans/photos, inspect images with available vision/OCR tooling, reconcile page order and fractions, and retain the original.
@@ -63,8 +63,8 @@ python3 {baseDir}/scripts/mealie.py request GET /api/recipes/ACTUAL_SLUG
 Optional server AI, only when configured and approved:
 
 ```sh
-python3 {baseDir}/scripts/mealie.py import-ai --content /path/source.txt
-python3 {baseDir}/scripts/mealie.py import-ai --image /path/page-1.jpg --image /path/page-2.jpg
+mealie import-ai --content /path/source.txt
+mealie import-ai --image /path/page-1.jpg --image /path/page-2.jpg
 ```
 
 `import-ai` also accepts `--url URL` and `--language LANG`. It sends multipart content/images; **do not send PDF files as images**. Inspect AI output against the source just as strictly as any other import.
@@ -72,3 +72,12 @@ python3 {baseDir}/scripts/mealie.py import-ai --image /path/page-1.jpg --image /
 ## Failure handling
 
 JSON responses print as JSON; errors print JSON to stderr and exit nonzero. Binary responses require `--output`; text can print directly. The helper does not automatically retry mutations or follow redirects. A timeout/disconnect or failed final GET may occur **after creation succeeded**: recover the returned slug if available, otherwise search and inspect existing recipes before any new create. Repair failed uploads or updates on the existing recipe. Preserve HTTP status/details without exposing credentials. Diagnose 401/403 through credentials/permissions, 422 through `describe` and payload correction, and redirects through the trusted instance URL configuration. Never bypass authentication or TLS security to make a call succeed.
+
+## Woodson household notes (local)
+
+- Run everything through the `mealie` command (it supplies the URL, token, and file root). Never look for, print, or pass the token yourself.
+- Put any file you import, upload, or download in `~/.openclaw/workspace/family/tmp/mealie/`. Files elsewhere are refused.
+- Recipe links for the family: `http://bison.home.thepad.net:9000/g/woodson/r/<slug>` (public, read-only, works on home Wi-Fi). Never send the internal 10.250.0.10 address.
+- This Mealie account can't delete other people's recipes or manage tags/categories. If a request needs that, tell the person to do it in Mealie (or ask Matt).
+- Always narrow discovery: `mealie endpoints --search <word>` and `mealie schema <Name>`. Never dump the full schema or endpoint list.
+- Shopping goes to AnyList via the `shopping` skill, not Mealie's shopping lists.
