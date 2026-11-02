@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""recipe: send a Mealie recipe straight to a Telegram chat.
+
+Usage: recipe <slug> --to <chat id> [--dry-run]
+
+M.A.C.K runs this instead of typing a recipe out itself: the model provider
+blocks replies that reproduce published recipes word for word, so the text
+goes from Mealie to Telegram without passing through the model's output.
+Install: cp to ~/bin/recipe (chmod 755).
+"""
+import argparse
+import json
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+HOME = Path.home()
+MEALIE_URL = "http://10.250.0.10:9000"
+PUBLIC_URL = "http://bison.home.thepad.net:9000/g/woodson/r/"
+TOKEN_FILE = HOME / ".openclaw/secrets/mealie-api-token"
+OPENCLAW_CONFIG = HOME / ".openclaw/openclaw.json"
+OPENCLAW_BIN = HOME / ".npm-global/bin/openclaw"
+TELEGRAM_LIMIT = 3900  # Telegram caps a message at 4096 chars; leave headroom
+
+
+def fail(msg):
+    print(f"recipe: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def allowed_targets():
+    """Only chats already allowed to talk to the bot can receive recipes."""
+    tg = json.loads(OPENCLAW_CONFIG.read_text()).get("channels", {}).get("telegram", {})
+    ids = set(map(str, tg.get("allowFrom", [])))
+    ids |= {str(g) for g, cfg in tg.get("groups", {}).items()
+            if g != "*" and cfg.get("enabled", True)}
+    return ids
+
+
+def fetch(slug):
+    req = urllib.request.Request(
+        f"{MEALIE_URL}/api/recipes/{slug}",
+        headers={"Authorization": f"Bearer {TOKEN_FILE.read_text().strip()}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            fail(f"no recipe with slug '{slug}'. Search first: "
+                 "mealie request GET '/api/recipes?search=<words>'")
+        fail(f"Mealie returned HTTP {e.code}")
+
+
+def fmt_num(x):
+    return f"{x:g}" if isinstance(x, (int, float)) else str(x)
+
+
+def render(r):
+    out = [r["name"].upper(), PUBLIC_URL + r["slug"]]
+    facts = []
+    if r.get("recipeServings"):
+        facts.append(f"Serves {fmt_num(r['recipeServings'])}")
+    # Mealie v3 splits yield into a number and a label ("24" + "cupcakes")
+    yq, yl = r.get("recipeYieldQuantity"), (r.get("recipeYield") or "").strip()
+    if yq or yl:
+        facts.append(f"{fmt_num(yq)} {yl}".strip() if yq else yl)
+    for key, label in (("totalTime", "Total"), ("prepTime", "Prep"),
+                       ("performTime", "Cook")):
+        if r.get(key):
+            facts.append(f"{label} {r[key]}")
+    if facts:
+        out.append(" · ".join(facts))
+
+    out += ["", "INGREDIENTS"]
+    for ing in r.get("recipeIngredient", []):
+        if ing.get("title"):
+            out += ["", ing["title"]]
+        line = (ing.get("display") or ing.get("originalText") or ing.get("note") or "").strip()
+        if line:
+            out.append(f"• {line}")
+
+    steps = r.get("recipeInstructions", [])
+    if steps:
+        out += ["", "STEPS"]
+        n = 0
+        for st in steps:
+            if st.get("title"):
+                out += ["", st["title"]]
+            text = (st.get("text") or "").strip()
+            if text:
+                n += 1
+                out.append(f"{n}. {text}")
+    return "\n".join(out)
+
+
+def chunks(text):
+    """Split on line boundaries so no message exceeds Telegram's limit."""
+    parts, cur = [], ""
+    for line in text.split("\n"):
+        while len(line) > TELEGRAM_LIMIT:  # a single huge line
+            parts.append(line[:TELEGRAM_LIMIT])
+            line = line[TELEGRAM_LIMIT:]
+        if len(cur) + len(line) + 1 > TELEGRAM_LIMIT:
+            parts.append(cur.rstrip("\n"))
+            cur = ""
+        cur += line + "\n"
+    if cur.strip():
+        parts.append(cur.rstrip("\n"))
+    return parts
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Send a Mealie recipe to a Telegram chat.")
+    ap.add_argument("slug", help="recipe slug, e.g. beatty-s-chocolate-cake")
+    ap.add_argument("--to", required=True,
+                    help="Telegram chat id of the conversation (e.g. 484409370 or -786936255)")
+    ap.add_argument("--dry-run", action="store_true", help="print instead of sending")
+    a = ap.parse_args()
+
+    target = a.to.removeprefix("telegram:")
+    if target not in allowed_targets():
+        fail(f"chat {target} is not on the Telegram allowlist")
+
+    parts = chunks(render(fetch(a.slug)))
+    if a.dry_run:
+        print("\n\n--- next message ---\n\n".join(parts))
+        return
+    for p in parts:
+        res = subprocess.run(
+            [str(OPENCLAW_BIN), "message", "send", "--channel", "telegram",
+             "--target", target, "--message", p],
+            capture_output=True, text=True)
+        if res.returncode != 0:
+            fail(f"send failed: {res.stderr.strip()[:300]}")
+    print(f"sent {a.slug} to {target} ({len(parts)} message{'s' if len(parts) > 1 else ''})")
+
+
+if __name__ == "__main__":
+    main()
