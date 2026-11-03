@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """recipe: send a Mealie recipe straight to a Telegram chat.
 
-Usage: recipe <slug> --to <chat id> [--dry-run]
+Usage: recipe <slug or search words> --to <chat id> [--dry-run]
 
 M.A.C.K runs this instead of typing a recipe out itself: the model provider
 blocks replies that reproduce published recipes word for word, so the text
@@ -13,6 +13,7 @@ import json
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -39,9 +40,9 @@ def allowed_targets():
     return ids
 
 
-def fetch(slug):
+def api(path):
     req = urllib.request.Request(
-        f"{MEALIE_URL}/api/recipes/{slug}",
+        f"{MEALIE_URL}{path}",
         headers={"Authorization": f"Bearer {TOKEN_FILE.read_text().strip()}"},
     )
     try:
@@ -49,9 +50,26 @@ def fetch(slug):
             return json.load(r)
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            fail(f"no recipe with slug '{slug}'. Search first: "
-                 "mealie request GET '/api/recipes?search=<words>'")
+            return None
         fail(f"Mealie returned HTTP {e.code}")
+
+
+def resolve(words):
+    """Exact slug, or search words. Returns a recipe, or exits listing choices."""
+    slug = "-".join(words).lower()
+    r = api(f"/api/recipes/{urllib.parse.quote(slug)}")
+    if r:
+        return r
+    q = urllib.parse.urlencode({"search": " ".join(words), "perPage": 10})
+    items = (api(f"/api/recipes?{q}") or {}).get("items", [])
+    if len(items) == 1:
+        return api(f"/api/recipes/{items[0]['slug']}")
+    if not items:
+        fail(f"no recipe matches '{' '.join(words)}'")
+    print("Several recipes match. Ask which one, then rerun with its slug:")
+    for i in items:
+        print(f"  {i['slug']}  ({i['name']})")
+    sys.exit(2)
 
 
 def fmt_num(x):
@@ -114,7 +132,7 @@ def chunks(text):
 
 def main():
     ap = argparse.ArgumentParser(description="Send a Mealie recipe to a Telegram chat.")
-    ap.add_argument("slug", help="recipe slug, e.g. beatty-s-chocolate-cake")
+    ap.add_argument("words", nargs="+", help="recipe slug or search words, e.g. chocolate cake")
     ap.add_argument("--to", required=True,
                     help="Telegram chat id of the conversation (e.g. 484409370 or -786936255)")
     ap.add_argument("--dry-run", action="store_true", help="print instead of sending")
@@ -124,7 +142,8 @@ def main():
     if target not in allowed_targets():
         fail(f"chat {target} is not on the Telegram allowlist")
 
-    parts = chunks(render(fetch(a.slug)))
+    r = resolve(a.words)
+    parts = chunks(render(r))
     if a.dry_run:
         print("\n\n--- next message ---\n\n".join(parts))
         return
@@ -135,7 +154,7 @@ def main():
             capture_output=True, text=True)
         if res.returncode != 0:
             fail(f"send failed: {res.stderr.strip()[:300]}")
-    print(f"sent {a.slug} to {target} ({len(parts)} message{'s' if len(parts) > 1 else ''})")
+    print(f"sent {r['slug']} to {target} ({len(parts)} message{'s' if len(parts) > 1 else ''})")
 
 
 if __name__ == "__main__":
